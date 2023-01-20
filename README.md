@@ -12,7 +12,8 @@
 	<li> [Создать приложение](https://dev.vk.com/) и получить `client_id`</li>
 	<li> Сгенерировать ВК [токен доступа пользователя](https://vk.com/dev.php?method=implicit_flow_user).</li>
 </ul>
-Пример запроса для получения токен доступа.
+Пример запроса для получения токен доступа.</br>
+
 ```
 https://oauth.vk.com/authorize?client_id=1&display=page&scope=photos,groups,wall,offline&response_type=token&v=5.131
 ```
