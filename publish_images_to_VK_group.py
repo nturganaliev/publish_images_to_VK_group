@@ -1,28 +1,12 @@
 import os
-import random
 import requests
-import time
-
-from download_image import download_image
-from get_file_extension_from_url import get_file_extension_from_url
 
 from dotenv import load_dotenv
+from download_xkcd_image import download_xkcd_image
+from download_xkcd_image import get_random_number_for_xkcd
 
 
-load_dotenv()
-
-TOKEN = os.getenv('VK_ACCESS_TOKEN')
-GROUP_ID = os.getenv('VK_GROUP_ID')
-API_VERSION = os.getenv('VK_API_VERSION')       
-
-
-def get_vk_upload_server_url():
-    url = "https://api.vk.com/method/photos.getWallUploadServer"
-    params = {
-        "access_token": TOKEN,
-        "group_id": GROUP_ID,
-        "v": API_VERSION,
-    }
+def get_vk_upload_server_url(url, params):
     response = requests.get(url, params)
     response.raise_for_status()
     return response.json()['response']['upload_url']
@@ -36,102 +20,92 @@ def upload_photo_to_vk_server(upload_url, photo):
         }
         response = requests.post(upload_url, files=image)
     response.raise_for_status()
-    return response
+    upload_response_content = response.json()
+    return [
+        upload_response_content['server'],
+        upload_response_content['photo'],
+        upload_response_content['hash'],
+    ]
 
 
-def save_vk_wall_photo(server, photo, vk_hash):
-    url = "https://api.vk.com/method/photos.saveWallPhoto"
-    params = {
-        "access_token": TOKEN,
-        "group_id": GROUP_ID,
-        "v": API_VERSION,
-        'server': server,
-        'photo': photo,
-        'hash': vk_hash,
-    }
+def save_vk_wall_photo(url, params):
     response = requests.post(url, params)
     response.raise_for_status()
-    return response
-
-
-def get_vk_wall_photo_id(response):
     response_content = response.json()
-    owner_id = response_content['response'][0]['owner_id']
     media_id = response_content['response'][0]['id']
+    owner_id = response_content['response'][0]['owner_id']
     return f"photo{owner_id}_{media_id}"
 
 
-def post_photo_to_vk_group(photo_id, text):
-    url = "https://api.vk.com/method/wall.post"
-    params = {
-        "access_token": TOKEN,
-        "attachments": photo_id,
-        "message": text,
-        "owner_id": f"-{GROUP_ID}",
-        "from_group": 0,
-        "v": API_VERSION,
-    }
+def post_photo_to_vk_group(url, params):
     response = requests.post(url, params)
     response.raise_for_status()
     return response.json()
 
 
-def get_random_number_for_xkcd():
-    url = "https://xkcd.com/info.0.json"
-    response = requests.get(url)
-    response.raise_for_status()
-    last_image_number = response.json()["num"]
-    return random.randint(1, last_image_number)
-
-
 def main():
+    load_dotenv()
+
+    token = os.getenv('VK_ACCESS_TOKEN')
+    group_id = os.getenv('VK_GROUP_ID')
+    api_version = os.getenv('VK_API_VERSION')
+
+    vk_url = "https://api.vk.com/method/"
+    methods = [
+        'photos.getWallUploadServer',
+        'photos.saveWallPhoto',
+        'wall.post',
+    ]
+    params = {
+        "access_token": token,
+        "group_id": group_id,
+        "v": api_version,
+    }
+
     try:
         random_number = get_random_number_for_xkcd()
     except requests.exceptions.RequestException as error:
-        print(error)
-    
-    url = f"https://xkcd.com/{random_number}/info.0.json"
-    response = requests.get(url)
-    response.raise_for_status()
-    response_content = response.json()
-    image_url = response_content["img"]
-    image_name = response_content["title"].lower()
-    image_extension = get_file_extension_from_url(image_url)
-    image_text = response_content['alt']
-    path = os.path.join(os.path.abspath("."), f"{image_name}{image_extension}")
-    
-    try:
-        download_image(image_url, path)
-        upload_url = get_vk_upload_server_url()
-        upload_response = upload_photo_to_vk_server(upload_url, path)
-    except requests.exceptions.RequestException as error:
-        print(error)
+        return error
 
-    upload_response_content = upload_response.json()
-    server = upload_response_content['server'],
-    photo = upload_response_content['photo'],
-    vk_hash = upload_response_content['hash'],
+    xkcd_url = f"https://xkcd.com/{random_number}/info.0.json"
+
+    path = os.path.abspath(".")
 
     try:
-        save_response = save_vk_wall_photo(server, photo, vk_hash)
+        image_path, image_text = download_xkcd_image(xkcd_url, path)
+        upload_url = get_vk_upload_server_url(f"{vk_url}/{methods[0]}",
+                                              params)
+        server, photo, vk_hash = upload_photo_to_vk_server(upload_url,
+                                                           image_path)
     except requests.exceptions.RequestException as error:
-        print(error)
+        return error
+    finally:
+        os.remove(image_path)
 
-    photo_id = get_vk_wall_photo_id(save_response)
+    params.update({
+        'server': server,
+        'photo': photo,
+        'hash': vk_hash,
+    })
 
     try:
-        post_photo_to_vk_group(photo_id, image_text)
+        photo_id = save_vk_wall_photo(f"{vk_url}/{methods[1]}", params)
     except requests.exceptions.RequestException as error:
-        print(error)
+        return error
 
-    time.sleep(10)
+    wall_post_params = {
+        "access_token": token,
+        "attachments": photo_id,
+        "message": image_text,
+        "owner_id": f"-{group_id}",
+        "from_group": 0,
+        "v": api_version,
+    }
 
-    if not os.path.exists(path):
-        print("Файл не существует.")
-        print("Завершение работы.")
-        return
-    os.remove(path)
-    print("Завершение работы.")
+    try:
+        post_photo_to_vk_group(f"{vk_url}/{methods[2]}", wall_post_params)
+    except requests.exceptions.RequestException as error:
+        return error
 
 
 if __name__ == '__main__':
