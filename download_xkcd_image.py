@@ -19,7 +19,7 @@ def get_random_number_for_xkcd():
     return random.randint(1, last_image_number)
 
 
-def download_xkcd_image(url, path, params=None):
+def download_xkcd_image(url, path):
     response = requests.get(url)
     response.raise_for_status()
     response_content = response.json()
@@ -34,4 +34,4 @@ def download_xkcd_image(url, path, params=None):
     with open(image_path, 'wb') as image:
         image.write(image_response.content)
 
-    return [image_path, text]
+    return image_path, text
